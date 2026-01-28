@@ -6,11 +6,18 @@ declare_id!("FGoa1MtyJRXew4FKdCSAMFfLEK7Y2GMfSjc2NsPrmX9p");
 pub mod solan_id {
     use super::*;
 
-    pub fn initialize_registry(ctx: Context<InitializeRegistry>, min_score: u64) -> Result<()> {
+    pub fn initialize_registry(
+        ctx: Context<InitializeRegistry>,
+        min_score: u64,
+        cooldown_period: i64,
+        diversity_bonus_percent: u8,
+    ) -> Result<()> {
         let registry = &mut ctx.accounts.registry;
         registry.authority = ctx.accounts.authority.key();
         registry.total_verified_users = 0;
         registry.min_score = min_score;
+        registry.cooldown_period = cooldown_period;
+        registry.diversity_bonus_percent = diversity_bonus_percent;
         registry.bump = ctx.bumps.registry;
         Ok(())
     }
@@ -18,17 +25,20 @@ pub mod solan_id {
     pub fn submit_proof(
         ctx: Context<SubmitProof>,
         proof_hash: [u8; 32],
-        score: u64,
+        base_score: u64,
         source: ProofSource,
         timestamp: i64,
     ) -> Result<()> {
         let registry = &mut ctx.accounts.registry;
         let user_proof = &mut ctx.accounts.user_proof;
+        let individual_proof = &mut ctx.accounts.individual_proof;
+        let proof_hash_registry = &mut ctx.accounts.proof_hash_registry;
+        let scoring_config = &ctx.accounts.scoring_config;
         let clock = Clock::get()?;
 
         require!(
-            score >= registry.min_score,
-            SolanIdError::ScoreBelowThreshold
+            !proof_hash_registry.is_used,
+            SolanIdError::ProofHashAlreadyUsed
         );
 
         require!(
@@ -41,25 +51,116 @@ pub mod solan_id {
             SolanIdError::ProofExpired
         );
 
+        if user_proof.user != Pubkey::default() {
+            require!(
+                clock.unix_timestamp >= user_proof.last_submission
+                    .checked_add(registry.cooldown_period)
+                    .ok_or(SolanIdError::Overflow)?,
+                SolanIdError::CooldownPeriodActive
+            );
+        }
+
+        let weight = scoring_config.weights[source as u8 as usize];
+        let weighted_score = base_score
+            .checked_mul(weight)
+            .and_then(|s| s.checked_div(100))
+            .ok_or(SolanIdError::Overflow)?;
+
+        let age_seconds = clock.unix_timestamp.checked_sub(timestamp).unwrap_or(0);
+        let recency_factor = if age_seconds < 2592000 {
+            100u8
+        } else if age_seconds < 7776000 {
+            75u8
+        } else if age_seconds < 15552000 {
+            50u8
+        } else {
+            25u8
+        };
+        let recency_adjusted_score = weighted_score
+            .checked_mul(recency_factor as u64)
+            .and_then(|s| s.checked_div(100))
+            .ok_or(SolanIdError::Overflow)?;
+
         let is_new_user = user_proof.user == Pubkey::default();
 
-        user_proof.user = ctx.accounts.user.key();
-        user_proof.proof_hash = proof_hash;
-        user_proof.score = score;
-        user_proof.source = source;
-        user_proof.verified_at = timestamp;
-        user_proof.bump = ctx.bumps.user_proof;
-
         if is_new_user {
+            user_proof.user = ctx.accounts.user.key();
+            user_proof.last_submission = clock.unix_timestamp;
+            user_proof.aggregated_score = 0;
+            user_proof.active_source_count = 0;
+            user_proof.bump = ctx.bumps.user_proof;
             registry.total_verified_users = registry.total_verified_users
                 .checked_add(1)
                 .ok_or(SolanIdError::Overflow)?;
         }
 
+        let was_source_active = individual_proof.user != Pubkey::default() && !individual_proof.is_revoked;
+        if !was_source_active {
+            user_proof.active_source_count = user_proof.active_source_count
+                .checked_add(1)
+                .ok_or(SolanIdError::Overflow)?;
+        }
+
+        individual_proof.user = ctx.accounts.user.key();
+        individual_proof.proof_hash = proof_hash;
+        individual_proof.base_score = base_score;
+        individual_proof.weighted_score = weighted_score;
+        individual_proof.source = source;
+        individual_proof.verified_at = timestamp;
+        individual_proof.is_revoked = false;
+        individual_proof.bump = ctx.bumps.individual_proof;
+
+        proof_hash_registry.is_used = true;
+        proof_hash_registry.user = ctx.accounts.user.key();
+        proof_hash_registry.bump = ctx.bumps.proof_hash_registry;
+
+        let old_score = if was_source_active {
+            let age_seconds = clock.unix_timestamp.checked_sub(individual_proof.verified_at).unwrap_or(0);
+            let recency = if age_seconds < 2592000 {
+                100u8
+            } else if age_seconds < 7776000 {
+                75u8
+            } else if age_seconds < 15552000 {
+                50u8
+            } else {
+                25u8
+            } as u64;
+            recency
+                .checked_mul(individual_proof.weighted_score)
+                .and_then(|s| s.checked_div(100))
+                .ok_or(SolanIdError::Overflow)?
+        } else {
+            0
+        };
+
+        user_proof.aggregated_score = user_proof
+            .aggregated_score
+            .checked_sub(old_score)
+            .unwrap_or(0);
+        user_proof.aggregated_score = user_proof
+            .aggregated_score
+            .checked_add(recency_adjusted_score)
+            .ok_or(SolanIdError::Overflow)?;
+
+        if user_proof.active_source_count > 1 && registry.diversity_bonus_percent > 0 {
+            let diversity_bonus = user_proof
+                .aggregated_score
+                .checked_mul(registry.diversity_bonus_percent as u64)
+                .and_then(|s| s.checked_div(100))
+                .ok_or(SolanIdError::Overflow)?;
+            user_proof.aggregated_score = user_proof
+                .aggregated_score
+                .checked_add(diversity_bonus)
+                .ok_or(SolanIdError::Overflow)?;
+        }
+
+        user_proof.last_submission = clock.unix_timestamp;
+
         emit!(ProofSubmitted {
             user: ctx.accounts.user.key(),
             proof_hash,
-            score,
+            base_score,
+            weighted_score,
             source,
             timestamp,
         });
@@ -67,48 +168,76 @@ pub mod solan_id {
         Ok(())
     }
 
-    pub fn update_proof(
-        ctx: Context<UpdateProof>,
-        proof_hash: [u8; 32],
-        score: u64,
-        source: ProofSource,
-        timestamp: i64,
-    ) -> Result<()> {
-        let registry = &ctx.accounts.registry;
+    pub fn revoke_proof(ctx: Context<RevokeProof>, _source: ProofSource) -> Result<()> {
+        let individual_proof = &mut ctx.accounts.individual_proof;
         let user_proof = &mut ctx.accounts.user_proof;
+        let registry = &ctx.accounts.registry;
         let clock = Clock::get()?;
 
         require!(
-            user_proof.user == ctx.accounts.user.key(),
+            individual_proof.user == ctx.accounts.user.key(),
             SolanIdError::Unauthorized
         );
 
         require!(
-            score >= registry.min_score,
-            SolanIdError::ScoreBelowThreshold
+            !individual_proof.is_revoked,
+            SolanIdError::ProofAlreadyRevoked
         );
 
-        require!(
-            timestamp <= clock.unix_timestamp + 300,
-            SolanIdError::InvalidTimestamp
-        );
+        let age_seconds = clock.unix_timestamp.checked_sub(individual_proof.verified_at).unwrap_or(0);
+        let recency_factor = if age_seconds < 2592000 {
+            100u8
+        } else if age_seconds < 7776000 {
+            75u8
+        } else if age_seconds < 15552000 {
+            50u8
+        } else {
+            25u8
+        };
+        let recency_adjusted_score = individual_proof
+            .weighted_score
+            .checked_mul(recency_factor as u64)
+            .and_then(|s| s.checked_div(100))
+            .ok_or(SolanIdError::Overflow)?;
 
-        require!(
-            timestamp >= clock.unix_timestamp - 3600,
-            SolanIdError::ProofExpired
-        );
+        user_proof.aggregated_score = user_proof
+            .aggregated_score
+            .checked_sub(recency_adjusted_score)
+            .unwrap_or(0);
 
-        user_proof.proof_hash = proof_hash;
-        user_proof.score = score;
-        user_proof.source = source;
-        user_proof.verified_at = timestamp;
+        user_proof.active_source_count = user_proof
+            .active_source_count
+            .checked_sub(1)
+            .unwrap_or(0);
 
-        emit!(ProofUpdated {
+        if user_proof.active_source_count > 1 && registry.diversity_bonus_percent > 0 {
+            let diversity_bonus = user_proof
+                .aggregated_score
+                .checked_mul(registry.diversity_bonus_percent as u64)
+                .and_then(|s| s.checked_div(100))
+                .ok_or(SolanIdError::Overflow)?;
+            user_proof.aggregated_score = user_proof
+                .aggregated_score
+                .checked_add(diversity_bonus)
+                .ok_or(SolanIdError::Overflow)?;
+        } else {
+            let old_diversity_bonus = user_proof
+                .aggregated_score
+                .checked_mul(registry.diversity_bonus_percent as u64)
+                .and_then(|s| s.checked_div(100 + registry.diversity_bonus_percent as u64))
+                .unwrap_or(0);
+            user_proof.aggregated_score = user_proof
+                .aggregated_score
+                .checked_sub(old_diversity_bonus)
+                .unwrap_or(0);
+        }
+
+        individual_proof.is_revoked = true;
+
+        emit!(ProofRevoked {
             user: ctx.accounts.user.key(),
-            proof_hash,
-            score,
-            source,
-            timestamp,
+            proof_hash: individual_proof.proof_hash,
+            source: individual_proof.source,
         });
 
         Ok(())
@@ -116,17 +245,16 @@ pub mod solan_id {
 
     pub fn verify_proof(ctx: Context<VerifyProof>) -> Result<ProofStatus> {
         let user_proof = &ctx.accounts.user_proof;
-        let clock = Clock::get()?;
+        let registry = &ctx.accounts.registry;
 
         let is_valid = user_proof.user != Pubkey::default()
-            && user_proof.verified_at > 0
-            && (clock.unix_timestamp - user_proof.verified_at) < 31536000;
+            && user_proof.aggregated_score >= registry.min_score
+            && user_proof.aggregated_score > 0;
 
         Ok(ProofStatus {
             is_verified: is_valid,
-            score: user_proof.score,
-            source: user_proof.source,
-            verified_at: user_proof.verified_at,
+            aggregated_score: user_proof.aggregated_score,
+            verified_at: user_proof.last_submission,
         })
     }
 
@@ -147,7 +275,7 @@ pub mod solan_id {
         weight: u64,
     ) -> Result<()> {
         let scoring_config = &mut ctx.accounts.scoring_config;
-        scoring_config.weights[source as usize] = weight;
+        scoring_config.weights[source as u8 as usize] = weight;
         emit!(ScoringConfigUpdated {
             source,
             weight,
@@ -162,6 +290,18 @@ pub mod solan_id {
         scoring_config.bump = ctx.bumps.scoring_config;
         Ok(())
     }
+
+    pub fn update_registry_config(
+        ctx: Context<UpdateRegistryConfig>,
+        cooldown_period: i64,
+        diversity_bonus_percent: u8,
+    ) -> Result<()> {
+        let registry = &mut ctx.accounts.registry;
+        registry.cooldown_period = cooldown_period;
+        registry.diversity_bonus_percent = diversity_bonus_percent;
+        Ok(())
+    }
+
 }
 
 #[derive(Accounts)]
@@ -169,7 +309,7 @@ pub struct InitializeRegistry<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + Registry::LEN,
+        space = 8 + Registry::INIT_SPACE,
         seeds = [b"registry"],
         bump
     )]
@@ -180,24 +320,43 @@ pub struct InitializeRegistry<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(proof_hash: [u8; 32], source: ProofSource)]
 pub struct SubmitProof<'info> {
     #[account(mut)]
     pub registry: Account<'info, Registry>,
     #[account(
         init_if_needed,
         payer = user,
-        space = 8 + UserProof::LEN,
+        space = 8 + UserProof::INIT_SPACE,
         seeds = [b"user_proof", user.key().as_ref()],
         bump
     )]
     pub user_proof: Account<'info, UserProof>,
+    #[account(
+        init,
+        payer = user,
+        space = 8 + IndividualProof::INIT_SPACE,
+        seeds = [b"individual_proof", user.key().as_ref(), &[source as u8]],
+        bump
+    )]
+    pub individual_proof: Account<'info, IndividualProof>,
+    #[account(
+        init,
+        payer = user,
+        space = 8 + ProofHashRegistry::INIT_SPACE,
+        seeds = [b"proof_hash", proof_hash.as_ref()],
+        bump
+    )]
+    pub proof_hash_registry: Account<'info, ProofHashRegistry>,
+    pub scoring_config: Account<'info, ScoringConfig>,
     #[account(mut)]
     pub user: Signer<'info>,
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct UpdateProof<'info> {
+#[instruction(source: ProofSource)]
+pub struct RevokeProof<'info> {
     #[account(mut)]
     pub registry: Account<'info, Registry>,
     #[account(
@@ -206,6 +365,12 @@ pub struct UpdateProof<'info> {
         bump = user_proof.bump
     )]
     pub user_proof: Account<'info, UserProof>,
+    #[account(
+        mut,
+        seeds = [b"individual_proof", user.key().as_ref(), &[source as u8]],
+        bump = individual_proof.bump
+    )]
+    pub individual_proof: Account<'info, IndividualProof>,
     #[account(mut)]
     pub user: Signer<'info>,
 }
@@ -217,6 +382,7 @@ pub struct VerifyProof<'info> {
         bump = user_proof.bump
     )]
     pub user_proof: Account<'info, UserProof>,
+    pub registry: Account<'info, Registry>,
     /// CHECK: User account is only used to derive the PDA for user_proof. The user_proof account validation ensures correctness.
     pub user: UncheckedAccount<'info>,
 }
@@ -238,7 +404,7 @@ pub struct InitializeScoringConfig<'info> {
     #[account(
         init,
         payer = authority,
-        space = 8 + ScoringConfig::LEN,
+        space = 8 + ScoringConfig::INIT_SPACE,
         seeds = [b"scoring_config"],
         bump
     )]
@@ -260,41 +426,66 @@ pub struct UpdateScoringConfig<'info> {
     pub authority: Signer<'info>,
 }
 
+#[derive(Accounts)]
+pub struct UpdateRegistryConfig<'info> {
+    #[account(
+        mut,
+        seeds = [b"registry"],
+        bump = registry.bump,
+        has_one = authority @ SolanIdError::Unauthorized
+    )]
+    pub registry: Account<'info, Registry>,
+    pub authority: Signer<'info>,
+}
+
 #[account]
+#[derive(InitSpace)]
 pub struct Registry {
     pub authority: Pubkey,
     pub total_verified_users: u64,
     pub min_score: u64,
+    pub cooldown_period: i64,
+    pub diversity_bonus_percent: u8,
     pub bump: u8,
 }
 
-impl Registry {
-    pub const LEN: usize = 32 + 8 + 8 + 1;
-}
-
 #[account]
+#[derive(InitSpace)]
 pub struct UserProof {
     pub user: Pubkey,
-    pub proof_hash: [u8; 32],
-    pub score: u64,
-    pub source: ProofSource,
-    pub verified_at: i64,
+    pub aggregated_score: u64,
+    pub last_submission: i64,
+    pub active_source_count: u8,
     pub bump: u8,
 }
 
-impl UserProof {
-    pub const LEN: usize = 32 + 32 + 8 + 1 + 8 + 1;
+#[account]
+#[derive(InitSpace)]
+pub struct IndividualProof {
+    pub user: Pubkey,
+    pub proof_hash: [u8; 32],
+    pub base_score: u64,
+    pub weighted_score: u64,
+    pub source: ProofSource,
+    pub verified_at: i64,
+    pub is_revoked: bool,
+    pub bump: u8,
 }
 
 #[account]
+#[derive(InitSpace)]
+pub struct ProofHashRegistry {
+    pub is_used: bool,
+    pub user: Pubkey,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
 pub struct ScoringConfig {
     pub authority: Pubkey,
     pub weights: [u64; 8],
     pub bump: u8,
-}
-
-impl ScoringConfig {
-    pub const LEN: usize = 32 + (8 * 8) + 1;
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
@@ -310,11 +501,14 @@ pub enum ProofSource {
     Discord = 7,
 }
 
+impl anchor_lang::Space for ProofSource {
+    const INIT_SPACE: usize = 1;
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct ProofStatus {
     pub is_verified: bool,
-    pub score: u64,
-    pub source: ProofSource,
+    pub aggregated_score: u64,
     pub verified_at: i64,
 }
 
@@ -322,18 +516,17 @@ pub struct ProofStatus {
 pub struct ProofSubmitted {
     pub user: Pubkey,
     pub proof_hash: [u8; 32],
-    pub score: u64,
+    pub base_score: u64,
+    pub weighted_score: u64,
     pub source: ProofSource,
     pub timestamp: i64,
 }
 
 #[event]
-pub struct ProofUpdated {
+pub struct ProofRevoked {
     pub user: Pubkey,
     pub proof_hash: [u8; 32],
-    pub score: u64,
     pub source: ProofSource,
-    pub timestamp: i64,
 }
 
 #[event]
@@ -360,5 +553,10 @@ pub enum SolanIdError {
     Unauthorized,
     #[msg("Arithmetic overflow")]
     Overflow,
+    #[msg("Proof hash has already been used")]
+    ProofHashAlreadyUsed,
+    #[msg("Proof is already revoked")]
+    ProofAlreadyRevoked,
+    #[msg("Cooldown period is still active")]
+    CooldownPeriodActive,
 }
-
