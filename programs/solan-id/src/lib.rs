@@ -1,4 +1,9 @@
 use anchor_lang::prelude::*;
+use anchor_lang::solana_program::instruction::Instruction;
+use anchor_lang::solana_program::sysvar::instructions::{
+    load_current_index_checked, load_instruction_at_checked,
+};
+use std::str::FromStr;
 
 declare_id!("FGoa1MtyJRXew4FKdCSAMFfLEK7Y2GMfSjc2NsPrmX9p");
 
@@ -30,6 +35,8 @@ pub mod solan_id {
         registry.diversity_bonus_percent = diversity_bonus_percent;
         registry.proof_ttl_seconds = proof_ttl_seconds;
         registry.verifier_authority = verifier_authority;
+        registry.pending_verifier_authority = Pubkey::default();
+        registry.verifier_rotation_available_at = 0;
         registry.bump = ctx.bumps.registry;
         Ok(())
     }
@@ -38,6 +45,8 @@ pub mod solan_id {
         ctx: Context<SubmitProof>,
         proof_hash: [u8; 32],
         source: ProofSource,
+        identity_nullifier: [u8; 32],
+        attestation_nonce: u64,
         proof_data: SourceProofData,
         base_score: u64,
         timestamp: i64,
@@ -45,21 +54,64 @@ pub mod solan_id {
         let registry = &mut ctx.accounts.registry;
         let user_proof = &mut ctx.accounts.user_proof;
         let individual_proof = &mut ctx.accounts.individual_proof;
-        let proof_hash_registry = &mut ctx.accounts.proof_hash_registry;
+        let identity_nullifier_registry = &mut ctx.accounts.identity_nullifier_registry;
+        let attestation_nonce_registry = &mut ctx.accounts.attestation_nonce_registry;
         let scoring_config = &ctx.accounts.scoring_config;
         let clock = Clock::get()?;
 
-        require!(
-            ctx.accounts.verifier.key() == registry.verifier_authority,
-            SolanIdError::Unauthorized
-        );
+        verify_verifier_attestation(
+            &ctx.accounts.instructions_sysvar.to_account_info(),
+            ctx.program_id,
+            registry.key(),
+            ctx.accounts.user.key(),
+            proof_hash,
+            source,
+            identity_nullifier,
+            attestation_nonce,
+            base_score,
+            timestamp,
+            registry.verifier_authority,
+        )?;
 
         validate_source_proof_data(source, &proof_data, base_score, clock.unix_timestamp)?;
 
         require!(
-            !proof_hash_registry.is_used,
-            SolanIdError::ProofHashAlreadyUsed
+            !attestation_nonce_registry.is_used,
+            SolanIdError::AttestationNonceAlreadyUsed
         );
+
+        require!(
+            identity_nullifier == extract_identity_nullifier(source, &proof_data)?,
+            SolanIdError::InvalidIdentityNullifier
+        );
+
+        if identity_nullifier_registry.claimed_by == Pubkey::default() {
+            identity_nullifier_registry.nullifier = identity_nullifier;
+            identity_nullifier_registry.source = source;
+            identity_nullifier_registry.claimed_by = ctx.accounts.user.key();
+            identity_nullifier_registry.is_burned = false;
+            identity_nullifier_registry.claimed_at = clock.unix_timestamp;
+            identity_nullifier_registry.last_proof_hash = proof_hash;
+            identity_nullifier_registry.bump = ctx.bumps.identity_nullifier_registry;
+        } else {
+            require!(
+                identity_nullifier_registry.source == source,
+                SolanIdError::InvalidIdentityNullifier
+            );
+            require!(
+                identity_nullifier_registry.nullifier == identity_nullifier,
+                SolanIdError::InvalidIdentityNullifier
+            );
+            require!(
+                identity_nullifier_registry.claimed_by == ctx.accounts.user.key(),
+                SolanIdError::DuplicateIdentityClaim
+            );
+            require!(
+                !identity_nullifier_registry.is_burned,
+                SolanIdError::IdentityRevokedPermanent
+            );
+            identity_nullifier_registry.last_proof_hash = proof_hash;
+        }
 
         require!(
             timestamp <= clock.unix_timestamp + 300,
@@ -164,14 +216,17 @@ pub mod solan_id {
         individual_proof.base_score = base_score;
         individual_proof.weighted_score = weighted_score;
         individual_proof.source = source;
+        individual_proof.identity_nullifier = identity_nullifier;
         individual_proof.proof_data = proof_data;
         individual_proof.verified_at = timestamp;
         individual_proof.is_revoked = false;
         individual_proof.bump = ctx.bumps.individual_proof;
 
-        proof_hash_registry.is_used = true;
-        proof_hash_registry.user = ctx.accounts.user.key();
-        proof_hash_registry.bump = ctx.bumps.proof_hash_registry;
+        attestation_nonce_registry.nonce = attestation_nonce;
+        attestation_nonce_registry.is_used = true;
+        attestation_nonce_registry.user = ctx.accounts.user.key();
+        attestation_nonce_registry.used_at = clock.unix_timestamp;
+        attestation_nonce_registry.bump = ctx.bumps.attestation_nonce_registry;
 
         let mut new_base_aggregated_score = old_base_aggregated_score
             .checked_sub(old_score)
@@ -207,6 +262,7 @@ pub mod solan_id {
     pub fn revoke_proof(ctx: Context<RevokeProof>, _source: ProofSource) -> Result<()> {
         let individual_proof = &mut ctx.accounts.individual_proof;
         let user_proof = &mut ctx.accounts.user_proof;
+        let identity_nullifier_registry = &mut ctx.accounts.identity_nullifier_registry;
         let registry = &ctx.accounts.registry;
         let clock = Clock::get()?;
 
@@ -218,6 +274,15 @@ pub mod solan_id {
         require!(
             !individual_proof.is_revoked,
             SolanIdError::ProofAlreadyRevoked
+        );
+
+        require!(
+            identity_nullifier_registry.nullifier == individual_proof.identity_nullifier,
+            SolanIdError::InvalidIdentityNullifier
+        );
+        require!(
+            identity_nullifier_registry.claimed_by == ctx.accounts.user.key(),
+            SolanIdError::Unauthorized
         );
 
         let age_seconds = clock
@@ -258,6 +323,7 @@ pub mod solan_id {
         )?;
 
         individual_proof.is_revoked = true;
+        identity_nullifier_registry.is_burned = true;
 
         emit!(ProofRevoked {
             user: ctx.accounts.user.key(),
@@ -322,21 +388,68 @@ pub mod solan_id {
         cooldown_period: i64,
         diversity_bonus_percent: u8,
         proof_ttl_seconds: i64,
-        verifier_authority: Pubkey,
     ) -> Result<()> {
         require!(cooldown_period >= 0, SolanIdError::InvalidConfig);
         require!(diversity_bonus_percent <= 100, SolanIdError::InvalidConfig);
         require!(proof_ttl_seconds > 0, SolanIdError::InvalidConfig);
-        require!(
-            verifier_authority != Pubkey::default(),
-            SolanIdError::InvalidConfig
-        );
 
         let registry = &mut ctx.accounts.registry;
         registry.cooldown_period = cooldown_period;
         registry.diversity_bonus_percent = diversity_bonus_percent;
         registry.proof_ttl_seconds = proof_ttl_seconds;
-        registry.verifier_authority = verifier_authority;
+        Ok(())
+    }
+
+    pub fn initiate_verifier_rotation(
+        ctx: Context<InitiateVerifierRotation>,
+        new_verifier_authority: Pubkey,
+        delay_seconds: i64,
+    ) -> Result<()> {
+        require!(
+            new_verifier_authority != Pubkey::default(),
+            SolanIdError::InvalidConfig
+        );
+        require!(delay_seconds >= 1, SolanIdError::InvalidConfig);
+
+        let registry = &mut ctx.accounts.registry;
+        let now = Clock::get()?.unix_timestamp;
+        registry.pending_verifier_authority = new_verifier_authority;
+        registry.verifier_rotation_available_at = now
+            .checked_add(delay_seconds)
+            .ok_or(SolanIdError::Overflow)?;
+
+        emit!(VerifierRotationInitiated {
+            current_verifier: registry.verifier_authority,
+            pending_verifier: registry.pending_verifier_authority,
+            activate_at: registry.verifier_rotation_available_at,
+        });
+
+        Ok(())
+    }
+
+    pub fn finalize_verifier_rotation(ctx: Context<FinalizeVerifierRotation>) -> Result<()> {
+        let registry = &mut ctx.accounts.registry;
+        require!(
+            registry.pending_verifier_authority != Pubkey::default(),
+            SolanIdError::NoVerifierRotationPending
+        );
+
+        let now = Clock::get()?.unix_timestamp;
+        require!(
+            now >= registry.verifier_rotation_available_at,
+            SolanIdError::VerifierRotationNotReady
+        );
+
+        let old_verifier = registry.verifier_authority;
+        registry.verifier_authority = registry.pending_verifier_authority;
+        registry.pending_verifier_authority = Pubkey::default();
+        registry.verifier_rotation_available_at = 0;
+
+        emit!(VerifierRotationFinalized {
+            old_verifier,
+            new_verifier: registry.verifier_authority,
+        });
+
         Ok(())
     }
 }
@@ -357,7 +470,12 @@ pub struct InitializeRegistry<'info> {
 }
 
 #[derive(Accounts)]
-#[instruction(proof_hash: [u8; 32], source: ProofSource)]
+#[instruction(
+    proof_hash: [u8; 32],
+    source: ProofSource,
+    identity_nullifier: [u8; 32],
+    attestation_nonce: u64
+)]
 pub struct SubmitProof<'info> {
     #[account(mut)]
     pub registry: Account<'info, Registry>,
@@ -380,13 +498,27 @@ pub struct SubmitProof<'info> {
     #[account(
         init_if_needed,
         payer = user,
-        space = 8 + ProofHashRegistry::INIT_SPACE,
-        seeds = [b"proof_hash", proof_hash.as_ref()],
+        space = 8 + IdentityNullifierRegistry::INIT_SPACE,
+        seeds = [b"identity_nullifier", identity_nullifier.as_ref()],
         bump
     )]
-    pub proof_hash_registry: Account<'info, ProofHashRegistry>,
+    pub identity_nullifier_registry: Account<'info, IdentityNullifierRegistry>,
+    #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + AttestationNonceRegistry::INIT_SPACE,
+        seeds = [
+            b"attestation_nonce",
+            registry.key().as_ref(),
+            &attestation_nonce.to_le_bytes(),
+        ],
+        bump
+    )]
+    pub attestation_nonce_registry: Account<'info, AttestationNonceRegistry>,
     pub scoring_config: Account<'info, ScoringConfig>,
-    pub verifier: Signer<'info>,
+    /// CHECK: Verified via sysvar instructions address constraint.
+    #[account(address = anchor_lang::solana_program::sysvar::instructions::id())]
+    pub instructions_sysvar: UncheckedAccount<'info>,
     #[account(mut)]
     pub user: Signer<'info>,
     pub system_program: Program<'info, System>,
@@ -409,6 +541,8 @@ pub struct RevokeProof<'info> {
         bump = individual_proof.bump
     )]
     pub individual_proof: Account<'info, IndividualProof>,
+    #[account(mut)]
+    pub identity_nullifier_registry: Account<'info, IdentityNullifierRegistry>,
     #[account(mut)]
     pub user: Signer<'info>,
 }
@@ -476,11 +610,37 @@ pub struct UpdateRegistryConfig<'info> {
     pub authority: Signer<'info>,
 }
 
+#[derive(Accounts)]
+pub struct InitiateVerifierRotation<'info> {
+    #[account(
+        mut,
+        seeds = [b"registry"],
+        bump = registry.bump,
+        has_one = authority @ SolanIdError::Unauthorized
+    )]
+    pub registry: Account<'info, Registry>,
+    pub authority: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct FinalizeVerifierRotation<'info> {
+    #[account(
+        mut,
+        seeds = [b"registry"],
+        bump = registry.bump,
+        has_one = authority @ SolanIdError::Unauthorized
+    )]
+    pub registry: Account<'info, Registry>,
+    pub authority: Signer<'info>,
+}
+
 #[account]
 #[derive(InitSpace)]
 pub struct Registry {
     pub authority: Pubkey,
     pub verifier_authority: Pubkey,
+    pub pending_verifier_authority: Pubkey,
+    pub verifier_rotation_available_at: i64,
     pub total_verified_users: u64,
     pub min_score: u64,
     pub cooldown_period: i64,
@@ -508,6 +668,7 @@ pub struct IndividualProof {
     pub base_score: u64,
     pub weighted_score: u64,
     pub source: ProofSource,
+    pub identity_nullifier: [u8; 32],
     pub proof_data: SourceProofData,
     pub verified_at: i64,
     pub is_revoked: bool,
@@ -527,6 +688,28 @@ pub struct ProofHashRegistry {
 pub struct ScoringConfig {
     pub authority: Pubkey,
     pub weights: [u64; 8],
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct IdentityNullifierRegistry {
+    pub nullifier: [u8; 32],
+    pub source: ProofSource,
+    pub claimed_by: Pubkey,
+    pub is_burned: bool,
+    pub claimed_at: i64,
+    pub last_proof_hash: [u8; 32],
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct AttestationNonceRegistry {
+    pub nonce: u64,
+    pub is_used: bool,
+    pub user: Pubkey,
+    pub used_at: i64,
     pub bump: u8,
 }
 
@@ -564,8 +747,171 @@ fn strip_diversity_bonus(
         .ok_or(SolanIdError::Overflow.into())
 }
 
+fn read_u16_le(data: &[u8], offset: usize) -> Result<u16> {
+    let end = offset
+        .checked_add(2)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+    let bytes = data
+        .get(offset..end)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+
+    Ok(u16::from_le_bytes([bytes[0], bytes[1]]))
+}
+
+fn build_attestation_message(
+    program_id: &Pubkey,
+    registry: &Pubkey,
+    user: &Pubkey,
+    proof_hash: &[u8; 32],
+    source: ProofSource,
+    identity_nullifier: &[u8; 32],
+    attestation_nonce: u64,
+    base_score: u64,
+    timestamp: i64,
+) -> Vec<u8> {
+    let mut message = Vec::with_capacity(190);
+    message.extend_from_slice(b"sid1");
+    message.extend_from_slice(program_id.as_ref());
+    message.extend_from_slice(registry.as_ref());
+    message.extend_from_slice(user.as_ref());
+    message.push(source as u8);
+    message.extend_from_slice(identity_nullifier);
+    message.extend_from_slice(&attestation_nonce.to_le_bytes());
+    message.extend_from_slice(&base_score.to_le_bytes());
+    message.extend_from_slice(&timestamp.to_le_bytes());
+    message.extend_from_slice(proof_hash);
+    message
+}
+
+fn verify_verifier_attestation(
+    instruction_sysvar: &AccountInfo,
+    program_id: &Pubkey,
+    registry: Pubkey,
+    user: Pubkey,
+    proof_hash: [u8; 32],
+    source: ProofSource,
+    identity_nullifier: [u8; 32],
+    attestation_nonce: u64,
+    base_score: u64,
+    timestamp: i64,
+    verifier_authority: Pubkey,
+) -> Result<()> {
+    let current_index = load_current_index_checked(instruction_sysvar)
+        .map_err(|_| error!(SolanIdError::InvalidAttestationInstruction))?
+        as usize;
+
+    require!(
+        current_index > 0,
+        SolanIdError::InvalidAttestationInstruction
+    );
+
+    let prior_ix = load_instruction_at_checked(current_index - 1, instruction_sysvar)
+        .map_err(|_| error!(SolanIdError::InvalidAttestationInstruction))?;
+
+    validate_ed25519_instruction(
+        &prior_ix,
+        &build_attestation_message(
+            program_id,
+            &registry,
+            &user,
+            &proof_hash,
+            source,
+            &identity_nullifier,
+            attestation_nonce,
+            base_score,
+            timestamp,
+        ),
+        &verifier_authority,
+    )
+}
+
+fn validate_ed25519_instruction(
+    instruction: &Instruction,
+    expected_message: &[u8],
+    expected_signer: &Pubkey,
+) -> Result<()> {
+    let ed25519_program_id = Pubkey::from_str("Ed25519SigVerify111111111111111111111111111")
+        .map_err(|_| error!(SolanIdError::InvalidAttestationInstruction))?;
+
+    require!(
+        instruction.program_id == ed25519_program_id,
+        SolanIdError::InvalidAttestationInstruction
+    );
+
+    let data = &instruction.data;
+    require!(
+        data.len() >= 16,
+        SolanIdError::InvalidAttestationInstruction
+    );
+    require!(data[0] == 1, SolanIdError::InvalidAttestationInstruction);
+
+    let signature_offset = read_u16_le(data, 2)? as usize;
+    let signature_instruction_index = read_u16_le(data, 4)?;
+    let public_key_offset = read_u16_le(data, 6)? as usize;
+    let public_key_instruction_index = read_u16_le(data, 8)?;
+    let message_data_offset = read_u16_le(data, 10)? as usize;
+    let message_data_size = read_u16_le(data, 12)? as usize;
+    let message_instruction_index = read_u16_le(data, 14)?;
+
+    require!(
+        signature_instruction_index == u16::MAX
+            && public_key_instruction_index == u16::MAX
+            && message_instruction_index == u16::MAX,
+        SolanIdError::InvalidAttestationInstruction
+    );
+
+    let signature_end = signature_offset
+        .checked_add(64)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+    let public_key_end = public_key_offset
+        .checked_add(32)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+    let message_end = message_data_offset
+        .checked_add(message_data_size)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+
+    let _signature = data
+        .get(signature_offset..signature_end)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+    let public_key = data
+        .get(public_key_offset..public_key_end)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+    let message = data
+        .get(message_data_offset..message_end)
+        .ok_or(SolanIdError::InvalidAttestationInstruction)?;
+
+    require!(
+        public_key == expected_signer.as_ref(),
+        SolanIdError::InvalidAttestationMessage
+    );
+    require!(
+        message == expected_message,
+        SolanIdError::InvalidAttestationMessage
+    );
+
+    Ok(())
+}
+
 fn is_non_zero_hash(hash: &[u8; 32]) -> bool {
     hash.iter().any(|b| *b != 0)
+}
+
+fn extract_identity_nullifier(
+    source: ProofSource,
+    proof_data: &SourceProofData,
+) -> Result<[u8; 32]> {
+    match (source, proof_data) {
+        (ProofSource::Reclaim, SourceProofData::Reclaim { identity_hash, .. }) => {
+            Ok(*identity_hash)
+        }
+        (ProofSource::GitcoinPassport, SourceProofData::GitcoinPassport { did_hash, .. }) => {
+            Ok(*did_hash)
+        }
+        (ProofSource::WorldId, SourceProofData::WorldId { nullifier_hash, .. }) => {
+            Ok(*nullifier_hash)
+        }
+        _ => err!(SolanIdError::SourcePayloadMismatch),
+    }
 }
 
 fn validate_source_proof_data(
@@ -578,11 +924,16 @@ fn validate_source_proof_data(
         (
             ProofSource::Reclaim,
             SourceProofData::Reclaim {
+                identity_hash,
                 provider_hash,
                 response_hash,
                 issued_at,
             },
         ) => {
+            require!(
+                is_non_zero_hash(identity_hash),
+                SolanIdError::InvalidSourceProofData
+            );
             require!(
                 is_non_zero_hash(provider_hash),
                 SolanIdError::InvalidSourceProofData
@@ -603,11 +954,16 @@ fn validate_source_proof_data(
         (
             ProofSource::GitcoinPassport,
             SourceProofData::GitcoinPassport {
+                did_hash,
                 stamp_count,
                 passport_score,
                 model_version,
             },
         ) => {
+            require!(
+                is_non_zero_hash(did_hash),
+                SolanIdError::InvalidSourceProofData
+            );
             require!(*stamp_count > 0, SolanIdError::InvalidSourceProofData);
             require!(*passport_score > 0, SolanIdError::InvalidSourceProofData);
             require!(*model_version > 0, SolanIdError::InvalidSourceProofData);
@@ -737,11 +1093,13 @@ impl anchor_lang::Space for ProofSource {
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, InitSpace, PartialEq, Eq)]
 pub enum SourceProofData {
     Reclaim {
+        identity_hash: [u8; 32],
         provider_hash: [u8; 32],
         response_hash: [u8; 32],
         issued_at: i64,
     },
     GitcoinPassport {
+        did_hash: [u8; 32],
         stamp_count: u16,
         passport_score: u16,
         model_version: u8,
@@ -809,6 +1167,19 @@ pub struct ScoringConfigUpdated {
     pub weight: u64,
 }
 
+#[event]
+pub struct VerifierRotationInitiated {
+    pub current_verifier: Pubkey,
+    pub pending_verifier: Pubkey,
+    pub activate_at: i64,
+}
+
+#[event]
+pub struct VerifierRotationFinalized {
+    pub old_verifier: Pubkey,
+    pub new_verifier: Pubkey,
+}
+
 #[error_code]
 pub enum SolanIdError {
     #[msg("Score is below the minimum threshold")]
@@ -833,4 +1204,20 @@ pub enum SolanIdError {
     SourcePayloadMismatch,
     #[msg("Invalid proof payload for selected source")]
     InvalidSourceProofData,
+    #[msg("Invalid verifier attestation instruction")]
+    InvalidAttestationInstruction,
+    #[msg("Invalid verifier attestation message")]
+    InvalidAttestationMessage,
+    #[msg("Identity nullifier is invalid for source payload")]
+    InvalidIdentityNullifier,
+    #[msg("Identity has already been claimed by another wallet")]
+    DuplicateIdentityClaim,
+    #[msg("Identity has been revoked permanently")]
+    IdentityRevokedPermanent,
+    #[msg("Attestation nonce was already used")]
+    AttestationNonceAlreadyUsed,
+    #[msg("No verifier rotation is pending")]
+    NoVerifierRotationPending,
+    #[msg("Verifier rotation delay has not elapsed")]
+    VerifierRotationNotReady,
 }
