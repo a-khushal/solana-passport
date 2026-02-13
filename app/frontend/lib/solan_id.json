@@ -1,0 +1,1612 @@
+{
+  "address": "FGoa1MtyJRXew4FKdCSAMFfLEK7Y2GMfSjc2NsPrmX9p",
+  "metadata": {
+    "name": "solan_id",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "finalize_verifier_rotation",
+      "discriminator": [
+        162,
+        250,
+        130,
+        176,
+        97,
+        150,
+        95,
+        74
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initialize_registry",
+      "discriminator": [
+        189,
+        181,
+        20,
+        17,
+        174,
+        57,
+        249,
+        59
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "min_score",
+          "type": "u64"
+        },
+        {
+          "name": "cooldown_period",
+          "type": "i64"
+        },
+        {
+          "name": "diversity_bonus_percent",
+          "type": "u8"
+        },
+        {
+          "name": "proof_ttl_seconds",
+          "type": "i64"
+        },
+        {
+          "name": "verifier_authority",
+          "type": "pubkey"
+        }
+      ]
+    },
+    {
+      "name": "initialize_scoring_config",
+      "discriminator": [
+        2,
+        61,
+        181,
+        131,
+        182,
+        164,
+        229,
+        8
+      ],
+      "accounts": [
+        {
+          "name": "scoring_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  111,
+                  114,
+                  105,
+                  110,
+                  103,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "initiate_verifier_rotation",
+      "discriminator": [
+        190,
+        138,
+        26,
+        9,
+        163,
+        49,
+        204,
+        125
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_verifier_authority",
+          "type": "pubkey"
+        },
+        {
+          "name": "delay_seconds",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "revoke_proof",
+      "discriminator": [
+        59,
+        117,
+        210,
+        117,
+        75,
+        24,
+        100,
+        117
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "user_proof",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  112,
+                  114,
+                  111,
+                  111,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "individual_proof",
+          "writable": true
+        },
+        {
+          "name": "identity_nullifier_registry",
+          "writable": true
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        }
+      ],
+      "args": [
+        {
+          "name": "_source",
+          "type": {
+            "defined": {
+              "name": "ProofSource"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "submit_proof",
+      "discriminator": [
+        54,
+        241,
+        46,
+        84,
+        4,
+        212,
+        46,
+        94
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true
+        },
+        {
+          "name": "user_proof",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  112,
+                  114,
+                  111,
+                  111,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "individual_proof",
+          "writable": true
+        },
+        {
+          "name": "identity_nullifier_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  105,
+                  100,
+                  101,
+                  110,
+                  116,
+                  105,
+                  116,
+                  121,
+                  95,
+                  110,
+                  117,
+                  108,
+                  108,
+                  105,
+                  102,
+                  105,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "arg",
+                "path": "identity_nullifier"
+              }
+            ]
+          }
+        },
+        {
+          "name": "attestation_nonce_registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  97,
+                  116,
+                  116,
+                  101,
+                  115,
+                  116,
+                  97,
+                  116,
+                  105,
+                  111,
+                  110,
+                  95,
+                  110,
+                  111,
+                  110,
+                  99,
+                  101
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "registry"
+              },
+              {
+                "kind": "arg",
+                "path": "attestation_nonce"
+              }
+            ]
+          }
+        },
+        {
+          "name": "scoring_config"
+        },
+        {
+          "name": "instructions_sysvar",
+          "address": "Sysvar1nstructions1111111111111111111111111"
+        },
+        {
+          "name": "user",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "proof_hash",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "source",
+          "type": {
+            "defined": {
+              "name": "ProofSource"
+            }
+          }
+        },
+        {
+          "name": "identity_nullifier",
+          "type": {
+            "array": [
+              "u8",
+              32
+            ]
+          }
+        },
+        {
+          "name": "attestation_nonce",
+          "type": "u64"
+        },
+        {
+          "name": "proof_data",
+          "type": {
+            "defined": {
+              "name": "SourceProofData"
+            }
+          }
+        },
+        {
+          "name": "base_score",
+          "type": "u64"
+        },
+        {
+          "name": "timestamp",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "update_min_score",
+      "discriminator": [
+        168,
+        82,
+        86,
+        238,
+        211,
+        223,
+        106,
+        168
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "new_min_score",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "update_registry_config",
+      "discriminator": [
+        205,
+        108,
+        204,
+        178,
+        107,
+        143,
+        150,
+        21
+      ],
+      "accounts": [
+        {
+          "name": "registry",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  114,
+                  101,
+                  103,
+                  105,
+                  115,
+                  116,
+                  114,
+                  121
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "registry"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "cooldown_period",
+          "type": "i64"
+        },
+        {
+          "name": "diversity_bonus_percent",
+          "type": "u8"
+        },
+        {
+          "name": "proof_ttl_seconds",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "update_scoring_config",
+      "discriminator": [
+        205,
+        86,
+        108,
+        242,
+        228,
+        45,
+        221,
+        215
+      ],
+      "accounts": [
+        {
+          "name": "scoring_config",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  115,
+                  99,
+                  111,
+                  114,
+                  105,
+                  110,
+                  103,
+                  95,
+                  99,
+                  111,
+                  110,
+                  102,
+                  105,
+                  103
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "signer": true,
+          "relations": [
+            "scoring_config"
+          ]
+        }
+      ],
+      "args": [
+        {
+          "name": "source",
+          "type": {
+            "defined": {
+              "name": "ProofSource"
+            }
+          }
+        },
+        {
+          "name": "weight",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "verify_proof",
+      "discriminator": [
+        217,
+        211,
+        191,
+        110,
+        144,
+        13,
+        186,
+        98
+      ],
+      "accounts": [
+        {
+          "name": "user_proof",
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  117,
+                  115,
+                  101,
+                  114,
+                  95,
+                  112,
+                  114,
+                  111,
+                  111,
+                  102
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "user"
+              }
+            ]
+          }
+        },
+        {
+          "name": "registry"
+        },
+        {
+          "name": "user"
+        }
+      ],
+      "args": [],
+      "returns": {
+        "defined": {
+          "name": "ProofStatus"
+        }
+      }
+    }
+  ],
+  "accounts": [
+    {
+      "name": "AttestationNonceRegistry",
+      "discriminator": [
+        187,
+        64,
+        229,
+        103,
+        62,
+        19,
+        232,
+        48
+      ]
+    },
+    {
+      "name": "IdentityNullifierRegistry",
+      "discriminator": [
+        29,
+        65,
+        238,
+        9,
+        58,
+        133,
+        230,
+        139
+      ]
+    },
+    {
+      "name": "IndividualProof",
+      "discriminator": [
+        116,
+        155,
+        20,
+        47,
+        54,
+        73,
+        143,
+        77
+      ]
+    },
+    {
+      "name": "Registry",
+      "discriminator": [
+        47,
+        174,
+        110,
+        246,
+        184,
+        182,
+        252,
+        218
+      ]
+    },
+    {
+      "name": "ScoringConfig",
+      "discriminator": [
+        168,
+        111,
+        75,
+        190,
+        1,
+        158,
+        15,
+        87
+      ]
+    },
+    {
+      "name": "UserProof",
+      "discriminator": [
+        36,
+        235,
+        9,
+        20,
+        200,
+        160,
+        201,
+        199
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "MinScoreUpdated",
+      "discriminator": [
+        191,
+        76,
+        145,
+        24,
+        126,
+        131,
+        253,
+        170
+      ]
+    },
+    {
+      "name": "ProofRevoked",
+      "discriminator": [
+        180,
+        50,
+        127,
+        28,
+        218,
+        29,
+        35,
+        42
+      ]
+    },
+    {
+      "name": "ProofSubmitted",
+      "discriminator": [
+        160,
+        51,
+        85,
+        70,
+        249,
+        89,
+        5,
+        139
+      ]
+    },
+    {
+      "name": "ScoringConfigUpdated",
+      "discriminator": [
+        175,
+        209,
+        2,
+        117,
+        87,
+        43,
+        22,
+        30
+      ]
+    },
+    {
+      "name": "VerifierRotationFinalized",
+      "discriminator": [
+        36,
+        49,
+        21,
+        152,
+        176,
+        69,
+        144,
+        92
+      ]
+    },
+    {
+      "name": "VerifierRotationInitiated",
+      "discriminator": [
+        157,
+        30,
+        175,
+        38,
+        97,
+        167,
+        58,
+        165
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "ScoreBelowThreshold",
+      "msg": "Score is below the minimum threshold"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidTimestamp",
+      "msg": "Invalid timestamp"
+    },
+    {
+      "code": 6002,
+      "name": "ProofExpired",
+      "msg": "Proof has expired"
+    },
+    {
+      "code": 6003,
+      "name": "Unauthorized",
+      "msg": "Unauthorized action"
+    },
+    {
+      "code": 6004,
+      "name": "Overflow",
+      "msg": "Arithmetic overflow"
+    },
+    {
+      "code": 6005,
+      "name": "ProofHashAlreadyUsed",
+      "msg": "Proof hash has already been used"
+    },
+    {
+      "code": 6006,
+      "name": "ProofAlreadyRevoked",
+      "msg": "Proof is already revoked"
+    },
+    {
+      "code": 6007,
+      "name": "CooldownPeriodActive",
+      "msg": "Cooldown period is still active"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidConfig",
+      "msg": "Invalid registry configuration"
+    },
+    {
+      "code": 6009,
+      "name": "SourcePayloadMismatch",
+      "msg": "Proof source payload does not match source type"
+    },
+    {
+      "code": 6010,
+      "name": "InvalidSourceProofData",
+      "msg": "Invalid proof payload for selected source"
+    },
+    {
+      "code": 6011,
+      "name": "InvalidAttestationInstruction",
+      "msg": "Invalid verifier attestation instruction"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidAttestationMessage",
+      "msg": "Invalid verifier attestation message"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidIdentityNullifier",
+      "msg": "Identity nullifier is invalid for source payload"
+    },
+    {
+      "code": 6014,
+      "name": "DuplicateIdentityClaim",
+      "msg": "Identity has already been claimed by another wallet"
+    },
+    {
+      "code": 6015,
+      "name": "IdentityRevokedPermanent",
+      "msg": "Identity has been revoked permanently"
+    },
+    {
+      "code": 6016,
+      "name": "AttestationNonceAlreadyUsed",
+      "msg": "Attestation nonce was already used"
+    },
+    {
+      "code": 6017,
+      "name": "NoVerifierRotationPending",
+      "msg": "No verifier rotation is pending"
+    },
+    {
+      "code": 6018,
+      "name": "VerifierRotationNotReady",
+      "msg": "Verifier rotation delay has not elapsed"
+    }
+  ],
+  "types": [
+    {
+      "name": "AttestationNonceRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nonce",
+            "type": "u64"
+          },
+          {
+            "name": "is_used",
+            "type": "bool"
+          },
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "used_at",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IdentityNullifierRegistry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "nullifier",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "type": {
+              "defined": {
+                "name": "ProofSource"
+              }
+            }
+          },
+          {
+            "name": "claimed_by",
+            "type": "pubkey"
+          },
+          {
+            "name": "is_burned",
+            "type": "bool"
+          },
+          {
+            "name": "claimed_at",
+            "type": "i64"
+          },
+          {
+            "name": "last_proof_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "IndividualProof",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "proof_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "base_score",
+            "type": "u64"
+          },
+          {
+            "name": "weighted_score",
+            "type": "u64"
+          },
+          {
+            "name": "source",
+            "type": {
+              "defined": {
+                "name": "ProofSource"
+              }
+            }
+          },
+          {
+            "name": "identity_nullifier",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "proof_data",
+            "type": {
+              "defined": {
+                "name": "SourceProofData"
+              }
+            }
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          },
+          {
+            "name": "is_revoked",
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MinScoreUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_score",
+            "type": "u64"
+          },
+          {
+            "name": "new_score",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProofRevoked",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "proof_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "source",
+            "type": {
+              "defined": {
+                "name": "ProofSource"
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProofSource",
+      "repr": {
+        "kind": "rust"
+      },
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Reclaim"
+          },
+          {
+            "name": "GitcoinPassport"
+          },
+          {
+            "name": "WorldId"
+          },
+          {
+            "name": "BrightId"
+          },
+          {
+            "name": "Lens"
+          },
+          {
+            "name": "Twitter"
+          },
+          {
+            "name": "Google"
+          },
+          {
+            "name": "Discord"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProofStatus",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "is_verified",
+            "type": "bool"
+          },
+          {
+            "name": "aggregated_score",
+            "type": "u64"
+          },
+          {
+            "name": "verified_at",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ProofSubmitted",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "proof_hash",
+            "type": {
+              "array": [
+                "u8",
+                32
+              ]
+            }
+          },
+          {
+            "name": "base_score",
+            "type": "u64"
+          },
+          {
+            "name": "weighted_score",
+            "type": "u64"
+          },
+          {
+            "name": "source",
+            "type": {
+              "defined": {
+                "name": "ProofSource"
+              }
+            }
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Registry",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "verifier_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_verifier_authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "verifier_rotation_available_at",
+            "type": "i64"
+          },
+          {
+            "name": "total_verified_users",
+            "type": "u64"
+          },
+          {
+            "name": "min_score",
+            "type": "u64"
+          },
+          {
+            "name": "cooldown_period",
+            "type": "i64"
+          },
+          {
+            "name": "diversity_bonus_percent",
+            "type": "u8"
+          },
+          {
+            "name": "proof_ttl_seconds",
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScoringConfig",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "type": "pubkey"
+          },
+          {
+            "name": "weights",
+            "type": {
+              "array": [
+                "u64",
+                8
+              ]
+            }
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ScoringConfigUpdated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "source",
+            "type": {
+              "defined": {
+                "name": "ProofSource"
+              }
+            }
+          },
+          {
+            "name": "weight",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "SourceProofData",
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Reclaim",
+            "fields": [
+              {
+                "name": "identity_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "provider_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "response_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "issued_at",
+                "type": "i64"
+              }
+            ]
+          },
+          {
+            "name": "GitcoinPassport",
+            "fields": [
+              {
+                "name": "did_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "stamp_count",
+                "type": "u16"
+              },
+              {
+                "name": "passport_score",
+                "type": "u16"
+              },
+              {
+                "name": "model_version",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "WorldId",
+            "fields": [
+              {
+                "name": "nullifier_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "merkle_root",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "verification_level",
+                "type": "u8"
+              }
+            ]
+          },
+          {
+            "name": "BrightId",
+            "fields": [
+              {
+                "name": "context_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "group_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "Lens",
+            "fields": [
+              {
+                "name": "profile_id",
+                "type": "u64"
+              },
+              {
+                "name": "handle_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "Twitter",
+            "fields": [
+              {
+                "name": "handle_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "tweet_id",
+                "type": "u64"
+              }
+            ]
+          },
+          {
+            "name": "Google",
+            "fields": [
+              {
+                "name": "account_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "domain_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "name": "Discord",
+            "fields": [
+              {
+                "name": "user_id_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              },
+              {
+                "name": "guild_id_hash",
+                "type": {
+                  "array": [
+                    "u8",
+                    32
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "UserProof",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "user",
+            "type": "pubkey"
+          },
+          {
+            "name": "aggregated_score",
+            "type": "u64"
+          },
+          {
+            "name": "last_submission",
+            "type": "i64"
+          },
+          {
+            "name": "valid_until",
+            "type": "i64"
+          },
+          {
+            "name": "active_source_count",
+            "type": "u8"
+          },
+          {
+            "name": "bump",
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerifierRotationFinalized",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "old_verifier",
+            "type": "pubkey"
+          },
+          {
+            "name": "new_verifier",
+            "type": "pubkey"
+          }
+        ]
+      }
+    },
+    {
+      "name": "VerifierRotationInitiated",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "current_verifier",
+            "type": "pubkey"
+          },
+          {
+            "name": "pending_verifier",
+            "type": "pubkey"
+          },
+          {
+            "name": "activate_at",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

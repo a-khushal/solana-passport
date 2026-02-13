@@ -1,21 +1,41 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  useAnchorWallet,
+  useConnection,
+  useWallet,
+} from "@solana/wallet-adapter-react";
+import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import {
+  finalizeRotation,
+  getProgram,
+  initiateRotation,
+  revokeProof,
+  submitProof,
+  updateRegistryConfig,
+  verifyProof,
+} from "../lib/protocol";
 
-const nowUnix = () => Math.floor(Date.now() / 1000);
-
-declare global {
-  interface Window {
-    solana?: {
-      connect: () => Promise<{ publicKey: { toString: () => string } }>;
-    };
-  }
-}
+const unixNow = () => Math.floor(Date.now() / 1000);
 
 export default function Page() {
-  const [wallet, setWallet] = useState("");
+  const { connected, publicKey } = useWallet();
+  const anchorWallet = useAnchorWallet();
+  const { connection } = useConnection();
+
+  const wallet = publicKey?.toBase58() ?? "";
+  const isConnected = useMemo(
+    () => connected && Boolean(publicKey),
+    [connected, publicKey]
+  );
+  const program = useMemo(
+    () => (anchorWallet ? getProgram(connection, anchorWallet) : null),
+    [connection, anchorWallet]
+  );
+
   const [logs, setLogs] = useState<string[]>([]);
-  const [verifyResult, setVerifyResult] = useState(
+  const [verifyOutput, setVerifyOutput] = useState(
     "No verification result yet."
   );
 
@@ -29,146 +49,242 @@ export default function Page() {
     payload:
       '{"reclaim":{"identityHash":[11],"providerHash":[12],"responseHash":[13],"issuedAt":0}}',
   });
-
   const [verifyAddress, setVerifyAddress] = useState("");
-
   const [revokeForm, setRevokeForm] = useState({
     source: "reclaim",
-    identityNullifier: "",
+    nullifier: "",
   });
-
-  const [registryForm, setRegistryForm] = useState({
+  const [configForm, setConfigForm] = useState({
     cooldown: "0",
-    diversityBonus: "20",
+    bonus: "20",
     ttl: "3600",
   });
-
   const [rotationForm, setRotationForm] = useState({
     verifier: "",
     delay: "60",
   });
 
-  const connected = useMemo(() => wallet.length > 0, [wallet]);
+  const addLog = (msg: string) => {
+    const ts = new Date().toLocaleTimeString();
+    setLogs((prev) => [`[${ts}] ${msg}`, ...prev].slice(0, 120));
+  };
 
   useEffect(() => {
-    setSubmitForm((s) => ({ ...s, timestamp: String(nowUnix()) }));
-    setLogs([`[${new Date().toLocaleTimeString()}] Console initialized.`]);
+    setSubmitForm((prev) => ({ ...prev, timestamp: String(unixNow()) }));
+    setLogs([`[${new Date().toLocaleTimeString()}] Ready.`]);
   }, []);
 
-  const addLog = (line: string) => {
-    const ts = new Date().toLocaleTimeString();
-    setLogs((prev) => [`[${ts}] ${line}`, ...prev].slice(0, 120));
-  };
-
-  const connectWallet = async () => {
-    try {
-      if (!window.solana) {
-        addLog("No wallet provider found. Install Phantom.");
-        return;
-      }
-      const result = await window.solana.connect();
-      const pubkey = result.publicKey.toString();
-      setWallet(pubkey);
-      setVerifyAddress(pubkey);
+  useEffect(() => {
+    if (wallet) {
+      setVerifyAddress((prev) => prev || wallet);
       addLog("Wallet connected.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      addLog(`Wallet connect failed: ${message}`);
     }
-  };
-
-  const onSubmitProof = (e: React.FormEvent) => {
-    e.preventDefault();
-    addLog(
-      `Submit proof | source=${submitForm.source} score=${submitForm.score} nonce=${submitForm.nonce}`
-    );
-  };
-
-  const onVerify = (e: React.FormEvent) => {
-    e.preventDefault();
-    const output = {
-      user: verifyAddress,
-      isVerified: connected,
-      aggregatedScore: connected ? Number(submitForm.score || 0) : 0,
-      verifiedAt: connected ? nowUnix() : 0,
-    };
-    setVerifyResult(JSON.stringify(output, null, 2));
-    addLog(`Verify requested for ${verifyAddress || "(empty)"}.`);
-  };
-
-  const onRevoke = (e: React.FormEvent) => {
-    e.preventDefault();
-    addLog(`Revoke proof | source=${revokeForm.source}`);
-  };
-
-  const onRegistryUpdate = (e: React.FormEvent) => {
-    e.preventDefault();
-    addLog(
-      `Registry update | cooldown=${registryForm.cooldown} bonus=${registryForm.diversityBonus} ttl=${registryForm.ttl}`
-    );
-  };
-
-  const onInitiateRotation = (e: React.FormEvent) => {
-    e.preventDefault();
-    addLog(
-      `Verifier rotation initiated | verifier=${
-        rotationForm.verifier || "(empty)"
-      } delay=${rotationForm.delay}s`
-    );
-  };
-
-  const onFinalizeRotation = () => {
-    addLog("Verifier rotation finalize requested.");
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wallet]);
 
   return (
-    <div className="root">
-      <aside className="sidebar">
-        <div className="logoRow">
-          <span className="logoDot" />
-          <div>
-            <p className="logoTitle">SolanID</p>
-            <p className="logoSub">Operator Console</p>
-          </div>
+    <div className="page">
+      <header className="top">
+        <div>
+          <p className="eyebrow">SolanID</p>
+          <h1>Protocol Console</h1>
+          <p className="muted">
+            Wallet adapter connected. Actions now call on-chain methods.
+          </p>
         </div>
+        <div className="topActions">
+          <span className={`pill ${isConnected ? "ok" : "off"}`}>
+            {isConnected ? "Connected" : "Disconnected"}
+          </span>
+          <WalletMultiButton className="walletBtn" />
+        </div>
+      </header>
 
-        <section className="panel tight">
-          <p className="kicker">Wallet</p>
-          <p className={`status ${connected ? "online" : "offline"}`}>
-            {connected ? "Connected" : "Disconnected"}
-          </p>
-          <button className="btn primary full" onClick={connectWallet}>
-            {connected ? "Reconnect" : "Connect Wallet"}
-          </button>
-          <p className="mono small break">{wallet || "No wallet connected"}</p>
+      <section className="meta card">
+        <div>
+          <p className="label">Wallet</p>
+          <p className="mono break">{wallet || "No wallet connected"}</p>
+        </div>
+        <div>
+          <p className="label">Cluster</p>
+          <p>{process.env.NEXT_PUBLIC_RPC_URL || "devnet"}</p>
+        </div>
+      </section>
+
+      <main className="grid two">
+        <section className="card block">
+          <h2>Submit Proof</h2>
+          <form
+            className="form"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!program || !publicKey)
+                  throw new Error("Connect wallet first");
+
+                const sig = await submitProof({
+                  program,
+                  user: publicKey,
+                  source: submitForm.source,
+                  score: submitForm.score,
+                  timestamp: submitForm.timestamp,
+                  nonce: submitForm.nonce,
+                  proofHashHex: submitForm.proofHash,
+                  identityNullifierHex: submitForm.identityNullifier,
+                  payloadJson: submitForm.payload,
+                });
+                addLog(`Submit success: ${sig}`);
+              } catch (error) {
+                addLog(
+                  `Submit failed: ${
+                    error instanceof Error ? error.message : "Unknown error"
+                  }`
+                );
+              }
+            }}
+          >
+            <label>
+              Source
+              <select
+                value={submitForm.source}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({ ...s, source: e.target.value }))
+                }
+              >
+                <option value="reclaim">Reclaim</option>
+                <option value="gitcoinPassport">Gitcoin Passport</option>
+                <option value="worldId">World ID</option>
+              </select>
+            </label>
+            <label>
+              Base Score
+              <input
+                value={submitForm.score}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({ ...s, score: e.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Timestamp
+              <input
+                value={submitForm.timestamp}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({ ...s, timestamp: e.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Attestation Nonce
+              <input
+                value={submitForm.nonce}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({ ...s, nonce: e.target.value }))
+                }
+              />
+            </label>
+            <label className="full">
+              Proof Hash (hex)
+              <input
+                value={submitForm.proofHash}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({ ...s, proofHash: e.target.value }))
+                }
+              />
+            </label>
+            <label className="full">
+              Identity Nullifier (hex)
+              <input
+                value={submitForm.identityNullifier}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({
+                    ...s,
+                    identityNullifier: e.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="full">
+              Source Payload (JSON)
+              <textarea
+                rows={5}
+                value={submitForm.payload}
+                onChange={(e) =>
+                  setSubmitForm((s) => ({ ...s, payload: e.target.value }))
+                }
+              />
+            </label>
+            <button className="btn primary">Submit Proof</button>
+          </form>
         </section>
 
-        <section className="panel tight">
-          <p className="kicker">Network</p>
-          <p>Localnet / Devnet</p>
-          <p className="muted">Switch wallet endpoint as needed.</p>
-        </section>
-      </aside>
+        <section className="stack">
+          <section className="card block">
+            <h2>Verify Status</h2>
+            <form
+              className="form single"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  if (!program) throw new Error("Connect wallet first");
+                  const result = await verifyProof({
+                    program,
+                    user: verifyAddress,
+                  });
+                  setVerifyOutput(JSON.stringify(result, null, 2));
+                  addLog(`Verify success for ${verifyAddress}`);
+                } catch (error) {
+                  addLog(
+                    `Verify failed: ${
+                      error instanceof Error ? error.message : "Unknown error"
+                    }`
+                  );
+                }
+              }}
+            >
+              <label>
+                User Address
+                <input
+                  value={verifyAddress}
+                  onChange={(e) => setVerifyAddress(e.target.value)}
+                />
+              </label>
+              <button className="btn">Check</button>
+            </form>
+            <pre className="result mono">{verifyOutput}</pre>
+          </section>
 
-      <main className="main">
-        <header className="hero panel">
-          <h1>Proof Management</h1>
-          <p>
-            Submit, verify, revoke, and rotate verifier keys from a single dark
-            control panel.
-          </p>
-        </header>
-
-        <section className="grid two">
-          <form className="panel" onSubmit={onSubmitProof}>
-            <h2>Submit Proof</h2>
-            <div className="fields twoCol">
+          <section className="card block">
+            <h2>Revoke Proof</h2>
+            <form
+              className="form single"
+              onSubmit={async (e) => {
+                e.preventDefault();
+                try {
+                  if (!program || !publicKey)
+                    throw new Error("Connect wallet first");
+                  const sig = await revokeProof({
+                    program,
+                    user: publicKey,
+                    source: revokeForm.source,
+                    identityNullifierHex: revokeForm.nullifier,
+                  });
+                  addLog(`Revoke success: ${sig}`);
+                } catch (error) {
+                  addLog(
+                    `Revoke failed: ${
+                      error instanceof Error ? error.message : "Unknown error"
+                    }`
+                  );
+                }
+              }}
+            >
               <label>
                 Source
                 <select
-                  value={submitForm.source}
+                  value={revokeForm.source}
                   onChange={(e) =>
-                    setSubmitForm((s) => ({ ...s, source: e.target.value }))
+                    setRevokeForm((s) => ({ ...s, source: e.target.value }))
                   }
                 >
                   <option value="reclaim">Reclaim</option>
@@ -176,214 +292,165 @@ export default function Page() {
                   <option value="worldId">World ID</option>
                 </select>
               </label>
-
               <label>
-                Base Score
+                Identity Nullifier
                 <input
-                  value={submitForm.score}
+                  value={revokeForm.nullifier}
                   onChange={(e) =>
-                    setSubmitForm((s) => ({ ...s, score: e.target.value }))
+                    setRevokeForm((s) => ({ ...s, nullifier: e.target.value }))
                   }
                 />
               </label>
-
-              <label>
-                Timestamp
-                <input
-                  value={submitForm.timestamp}
-                  onChange={(e) =>
-                    setSubmitForm((s) => ({ ...s, timestamp: e.target.value }))
-                  }
-                />
-              </label>
-
-              <label>
-                Nonce
-                <input
-                  value={submitForm.nonce}
-                  onChange={(e) =>
-                    setSubmitForm((s) => ({ ...s, nonce: e.target.value }))
-                  }
-                />
-              </label>
-
-              <label className="full">
-                Proof Hash (hex)
-                <input
-                  value={submitForm.proofHash}
-                  onChange={(e) =>
-                    setSubmitForm((s) => ({ ...s, proofHash: e.target.value }))
-                  }
-                />
-              </label>
-
-              <label className="full">
-                Identity Nullifier (hex)
-                <input
-                  value={submitForm.identityNullifier}
-                  onChange={(e) =>
-                    setSubmitForm((s) => ({
-                      ...s,
-                      identityNullifier: e.target.value,
-                    }))
-                  }
-                />
-              </label>
-
-              <label className="full">
-                Source Payload (JSON)
-                <textarea
-                  rows={5}
-                  value={submitForm.payload}
-                  onChange={(e) =>
-                    setSubmitForm((s) => ({ ...s, payload: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
-
-            <button className="btn primary">Submit Proof</button>
-          </form>
-
-          <div className="stack">
-            <form className="panel" onSubmit={onVerify}>
-              <h2>Verify Status</h2>
-              <div className="fields oneCol">
-                <label>
-                  User Address
-                  <input
-                    value={verifyAddress}
-                    onChange={(e) => setVerifyAddress(e.target.value)}
-                  />
-                </label>
-              </div>
-              <div className="row">
-                <button className="btn">Check</button>
-              </div>
-              <pre className="result mono">{verifyResult}</pre>
-            </form>
-
-            <form className="panel" onSubmit={onRevoke}>
-              <h2>Revoke Proof</h2>
-              <div className="fields oneCol">
-                <label>
-                  Source
-                  <select
-                    value={revokeForm.source}
-                    onChange={(e) =>
-                      setRevokeForm((s) => ({ ...s, source: e.target.value }))
-                    }
-                  >
-                    <option value="reclaim">Reclaim</option>
-                    <option value="gitcoinPassport">Gitcoin Passport</option>
-                    <option value="worldId">World ID</option>
-                  </select>
-                </label>
-                <label>
-                  Identity Nullifier
-                  <input
-                    value={revokeForm.identityNullifier}
-                    onChange={(e) =>
-                      setRevokeForm((s) => ({
-                        ...s,
-                        identityNullifier: e.target.value,
-                      }))
-                    }
-                  />
-                </label>
-              </div>
               <button className="btn danger">Revoke</button>
             </form>
-          </div>
+          </section>
         </section>
+      </main>
 
-        <section className="grid two">
-          <form className="panel" onSubmit={onRegistryUpdate}>
-            <h2>Registry Config</h2>
-            <div className="fields oneCol">
-              <label>
-                Cooldown Seconds
-                <input
-                  value={registryForm.cooldown}
-                  onChange={(e) =>
-                    setRegistryForm((s) => ({ ...s, cooldown: e.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                Diversity Bonus %
-                <input
-                  value={registryForm.diversityBonus}
-                  onChange={(e) =>
-                    setRegistryForm((s) => ({
-                      ...s,
-                      diversityBonus: e.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Proof TTL Seconds
-                <input
-                  value={registryForm.ttl}
-                  onChange={(e) =>
-                    setRegistryForm((s) => ({ ...s, ttl: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
+      <section className="grid two">
+        <section className="card block">
+          <h2>Registry Config</h2>
+          <form
+            className="form single"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!program || !publicKey)
+                  throw new Error("Connect wallet first");
+                const sig = await updateRegistryConfig({
+                  program,
+                  authority: publicKey,
+                  cooldown: configForm.cooldown,
+                  bonus: configForm.bonus,
+                  ttl: configForm.ttl,
+                });
+                addLog(`Config update success: ${sig}`);
+              } catch (error) {
+                addLog(
+                  `Config update failed: ${
+                    error instanceof Error ? error.message : "Unknown error"
+                  }`
+                );
+              }
+            }}
+          >
+            <label>
+              Cooldown Seconds
+              <input
+                value={configForm.cooldown}
+                onChange={(e) =>
+                  setConfigForm((s) => ({ ...s, cooldown: e.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Diversity Bonus %
+              <input
+                value={configForm.bonus}
+                onChange={(e) =>
+                  setConfigForm((s) => ({ ...s, bonus: e.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Proof TTL Seconds
+              <input
+                value={configForm.ttl}
+                onChange={(e) =>
+                  setConfigForm((s) => ({ ...s, ttl: e.target.value }))
+                }
+              />
+            </label>
             <button className="btn">Update Config</button>
           </form>
+        </section>
 
-          <form className="panel" onSubmit={onInitiateRotation}>
-            <h2>Verifier Rotation</h2>
-            <div className="fields oneCol">
-              <label>
-                New Verifier Pubkey
-                <input
-                  value={rotationForm.verifier}
-                  onChange={(e) =>
-                    setRotationForm((s) => ({ ...s, verifier: e.target.value }))
-                  }
-                />
-              </label>
-              <label>
-                Delay Seconds
-                <input
-                  value={rotationForm.delay}
-                  onChange={(e) =>
-                    setRotationForm((s) => ({ ...s, delay: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
+        <section className="card block">
+          <h2>Verifier Rotation</h2>
+          <form
+            className="form single"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                if (!program || !publicKey)
+                  throw new Error("Connect wallet first");
+                const sig = await initiateRotation({
+                  program,
+                  authority: publicKey,
+                  verifier: rotationForm.verifier,
+                  delay: rotationForm.delay,
+                });
+                addLog(`Rotation initiate success: ${sig}`);
+              } catch (error) {
+                addLog(
+                  `Rotation initiate failed: ${
+                    error instanceof Error ? error.message : "Unknown error"
+                  }`
+                );
+              }
+            }}
+          >
+            <label>
+              New Verifier Pubkey
+              <input
+                value={rotationForm.verifier}
+                onChange={(e) =>
+                  setRotationForm((s) => ({ ...s, verifier: e.target.value }))
+                }
+              />
+            </label>
+            <label>
+              Delay Seconds
+              <input
+                value={rotationForm.delay}
+                onChange={(e) =>
+                  setRotationForm((s) => ({ ...s, delay: e.target.value }))
+                }
+              />
+            </label>
             <div className="row">
               <button className="btn">Initiate</button>
               <button
                 className="btn"
                 type="button"
-                onClick={onFinalizeRotation}
+                onClick={async () => {
+                  try {
+                    if (!program || !publicKey)
+                      throw new Error("Connect wallet first");
+                    const sig = await finalizeRotation({
+                      program,
+                      authority: publicKey,
+                    });
+                    addLog(`Rotation finalize success: ${sig}`);
+                  } catch (error) {
+                    addLog(
+                      `Rotation finalize failed: ${
+                        error instanceof Error ? error.message : "Unknown error"
+                      }`
+                    );
+                  }
+                }}
               >
                 Finalize
               </button>
             </div>
           </form>
         </section>
+      </section>
 
-        <section className="panel">
-          <div className="logHeader">
-            <h2>Activity</h2>
-            <button className="btn ghost" onClick={() => setLogs([])}>
-              Clear
-            </button>
-          </div>
-          <div className="log mono">
-            {logs.length === 0
-              ? "No logs."
-              : logs.map((line, i) => <p key={i}>{line}</p>)}
-          </div>
-        </section>
-      </main>
+      <section className="card block">
+        <div className="row between">
+          <h2>Activity</h2>
+          <button className="btn ghost" onClick={() => setLogs([])}>
+            Clear
+          </button>
+        </div>
+        <div className="log mono">
+          {logs.length === 0
+            ? "No logs."
+            : logs.map((line, i) => <p key={i}>{line}</p>)}
+        </div>
+      </section>
     </div>
   );
 }
