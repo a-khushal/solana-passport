@@ -102,6 +102,22 @@ h2 {
   padding: 14px;
 }
 
+.notice {
+  padding: 10px 14px;
+}
+
+.notice.ok {
+  border-color: #3f6b53;
+  background: #18261f;
+  color: #b8dfc4;
+}
+
+.notice.error {
+  border-color: #7a4b4b;
+  background: #2a1a1a;
+  color: #efb3b3;
+}
+
 .grid.two {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -193,6 +209,11 @@ textarea {
 
 .btn:hover {
   background: #2a3140;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .btn.primary {

@@ -63,10 +63,44 @@ export default function Page() {
     verifier: "",
     delay: "60",
   });
+  const [pending, setPending] = useState({
+    submit: false,
+    verify: false,
+    revoke: false,
+    config: false,
+    rotateInit: false,
+    rotateFinalize: false,
+  });
+  const [notice, setNotice] = useState<{
+    type: "ok" | "error";
+    text: string;
+  } | null>(null);
 
   const addLog = (msg: string) => {
     const ts = new Date().toLocaleTimeString();
     setLogs((prev) => [`[${ts}] ${msg}`, ...prev].slice(0, 120));
+  };
+
+  const explorerTxUrl = (sig: string) => {
+    const cluster = process.env.NEXT_PUBLIC_EXPLORER_CLUSTER || "devnet";
+    return `https://explorer.solana.com/tx/${sig}?cluster=${cluster}`;
+  };
+
+  const runAction = async (
+    key: keyof typeof pending,
+    action: () => Promise<void>
+  ) => {
+    setNotice(null);
+    setPending((prev) => ({ ...prev, [key]: true }));
+    try {
+      await action();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      setNotice({ type: "error", text: message });
+      addLog(`Error: ${message}`);
+    } finally {
+      setPending((prev) => ({ ...prev, [key]: false }));
+    }
   };
 
   useEffect(() => {
@@ -111,6 +145,12 @@ export default function Page() {
         </div>
       </section>
 
+      {notice && (
+        <section className={`card block notice ${notice.type}`}>
+          {notice.text}
+        </section>
+      )}
+
       <main className="grid two">
         <section className="card block">
           <h2>Submit Proof</h2>
@@ -118,7 +158,7 @@ export default function Page() {
             className="form"
             onSubmit={async (e) => {
               e.preventDefault();
-              try {
+              await runAction("submit", async () => {
                 if (!program || !publicKey)
                   throw new Error("Connect wallet first");
 
@@ -133,14 +173,14 @@ export default function Page() {
                   identityNullifierHex: submitForm.identityNullifier,
                   payloadJson: submitForm.payload,
                 });
+
+                setNotice({
+                  type: "ok",
+                  text: "Proof submitted successfully.",
+                });
                 addLog(`Submit success: ${sig}`);
-              } catch (error) {
-                addLog(
-                  `Submit failed: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                  }`
-                );
-              }
+                addLog(`Explorer: ${explorerTxUrl(sig)}`);
+              });
             }}
           >
             <label>
@@ -214,7 +254,12 @@ export default function Page() {
                 }
               />
             </label>
-            <button className="btn primary">Submit Proof</button>
+            <button
+              className="btn primary"
+              disabled={pending.submit || !isConnected}
+            >
+              {pending.submit ? "Submitting..." : "Submit Proof"}
+            </button>
           </form>
         </section>
 
@@ -225,21 +270,16 @@ export default function Page() {
               className="form single"
               onSubmit={async (e) => {
                 e.preventDefault();
-                try {
+                await runAction("verify", async () => {
                   if (!program) throw new Error("Connect wallet first");
                   const result = await verifyProof({
                     program,
                     user: verifyAddress,
                   });
                   setVerifyOutput(JSON.stringify(result, null, 2));
+                  setNotice({ type: "ok", text: "Verification fetched." });
                   addLog(`Verify success for ${verifyAddress}`);
-                } catch (error) {
-                  addLog(
-                    `Verify failed: ${
-                      error instanceof Error ? error.message : "Unknown error"
-                    }`
-                  );
-                }
+                });
               }}
             >
               <label>
@@ -249,7 +289,9 @@ export default function Page() {
                   onChange={(e) => setVerifyAddress(e.target.value)}
                 />
               </label>
-              <button className="btn">Check</button>
+              <button className="btn" disabled={pending.verify || !isConnected}>
+                {pending.verify ? "Checking..." : "Check"}
+              </button>
             </form>
             <pre className="result mono">{verifyOutput}</pre>
           </section>
@@ -260,7 +302,7 @@ export default function Page() {
               className="form single"
               onSubmit={async (e) => {
                 e.preventDefault();
-                try {
+                await runAction("revoke", async () => {
                   if (!program || !publicKey)
                     throw new Error("Connect wallet first");
                   const sig = await revokeProof({
@@ -269,14 +311,10 @@ export default function Page() {
                     source: revokeForm.source,
                     identityNullifierHex: revokeForm.nullifier,
                   });
+                  setNotice({ type: "ok", text: "Proof revoked." });
                   addLog(`Revoke success: ${sig}`);
-                } catch (error) {
-                  addLog(
-                    `Revoke failed: ${
-                      error instanceof Error ? error.message : "Unknown error"
-                    }`
-                  );
-                }
+                  addLog(`Explorer: ${explorerTxUrl(sig)}`);
+                });
               }}
             >
               <label>
@@ -301,7 +339,12 @@ export default function Page() {
                   }
                 />
               </label>
-              <button className="btn danger">Revoke</button>
+              <button
+                className="btn danger"
+                disabled={pending.revoke || !isConnected}
+              >
+                {pending.revoke ? "Revoking..." : "Revoke"}
+              </button>
             </form>
           </section>
         </section>
@@ -314,7 +357,7 @@ export default function Page() {
             className="form single"
             onSubmit={async (e) => {
               e.preventDefault();
-              try {
+              await runAction("config", async () => {
                 if (!program || !publicKey)
                   throw new Error("Connect wallet first");
                 const sig = await updateRegistryConfig({
@@ -324,14 +367,10 @@ export default function Page() {
                   bonus: configForm.bonus,
                   ttl: configForm.ttl,
                 });
+                setNotice({ type: "ok", text: "Registry config updated." });
                 addLog(`Config update success: ${sig}`);
-              } catch (error) {
-                addLog(
-                  `Config update failed: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                  }`
-                );
-              }
+                addLog(`Explorer: ${explorerTxUrl(sig)}`);
+              });
             }}
           >
             <label>
@@ -361,7 +400,9 @@ export default function Page() {
                 }
               />
             </label>
-            <button className="btn">Update Config</button>
+            <button className="btn" disabled={pending.config || !isConnected}>
+              {pending.config ? "Updating..." : "Update Config"}
+            </button>
           </form>
         </section>
 
@@ -371,7 +412,7 @@ export default function Page() {
             className="form single"
             onSubmit={async (e) => {
               e.preventDefault();
-              try {
+              await runAction("rotateInit", async () => {
                 if (!program || !publicKey)
                   throw new Error("Connect wallet first");
                 const sig = await initiateRotation({
@@ -380,14 +421,10 @@ export default function Page() {
                   verifier: rotationForm.verifier,
                   delay: rotationForm.delay,
                 });
+                setNotice({ type: "ok", text: "Verifier rotation initiated." });
                 addLog(`Rotation initiate success: ${sig}`);
-              } catch (error) {
-                addLog(
-                  `Rotation initiate failed: ${
-                    error instanceof Error ? error.message : "Unknown error"
-                  }`
-                );
-              }
+                addLog(`Explorer: ${explorerTxUrl(sig)}`);
+              });
             }}
           >
             <label>
@@ -409,29 +446,34 @@ export default function Page() {
               />
             </label>
             <div className="row">
-              <button className="btn">Initiate</button>
+              <button
+                className="btn"
+                disabled={pending.rotateInit || !isConnected}
+              >
+                {pending.rotateInit ? "Initiating..." : "Initiate"}
+              </button>
               <button
                 className="btn"
                 type="button"
                 onClick={async () => {
-                  try {
+                  await runAction("rotateFinalize", async () => {
                     if (!program || !publicKey)
                       throw new Error("Connect wallet first");
                     const sig = await finalizeRotation({
                       program,
                       authority: publicKey,
                     });
+                    setNotice({
+                      type: "ok",
+                      text: "Verifier rotation finalized.",
+                    });
                     addLog(`Rotation finalize success: ${sig}`);
-                  } catch (error) {
-                    addLog(
-                      `Rotation finalize failed: ${
-                        error instanceof Error ? error.message : "Unknown error"
-                      }`
-                    );
-                  }
+                    addLog(`Explorer: ${explorerTxUrl(sig)}`);
+                  });
                 }}
+                disabled={pending.rotateFinalize || !isConnected}
               >
-                Finalize
+                {pending.rotateFinalize ? "Finalizing..." : "Finalize"}
               </button>
             </div>
           </form>
