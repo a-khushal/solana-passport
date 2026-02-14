@@ -7,6 +7,7 @@ import {
   useWallet,
 } from "@solana/wallet-adapter-react";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { PublicKey } from "@solana/web3.js";
 import {
   finalizeRotation,
   getProgram,
@@ -16,6 +17,7 @@ import {
   updateRegistryConfig,
   verifyProof,
 } from "../lib/protocol";
+import { getFriendlyError } from "../lib/errorMap";
 
 const unixNow = () => Math.floor(Date.now() / 1000);
 
@@ -86,6 +88,72 @@ export default function Page() {
     return `https://explorer.solana.com/tx/${sig}?cluster=${cluster}`;
   };
 
+  const assertHex32 = (value: string, field: string) => {
+    const clean = value.trim().replace(/^0x/, "");
+    if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+      throw new Error(`${field} must be 64 hex characters`);
+    }
+  };
+
+  const assertPubkey = (value: string, field: string) => {
+    try {
+      // eslint-disable-next-line no-new
+      new PublicKey(value.trim());
+    } catch {
+      throw new Error(`${field} is not a valid Solana public key`);
+    }
+  };
+
+  const assertInt = (
+    value: string,
+    field: string,
+    min?: number,
+    max?: number
+  ) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) {
+      throw new Error(`${field} must be an integer`);
+    }
+    if (min !== undefined && n < min) {
+      throw new Error(`${field} must be >= ${min}`);
+    }
+    if (max !== undefined && n > max) {
+      throw new Error(`${field} must be <= ${max}`);
+    }
+  };
+
+  const validateSubmitForm = () => {
+    assertInt(submitForm.score, "Base score", 1);
+    assertInt(submitForm.timestamp, "Timestamp", 0);
+    assertInt(submitForm.nonce, "Attestation nonce", 1);
+    assertHex32(submitForm.proofHash, "Proof hash");
+    assertHex32(submitForm.identityNullifier, "Identity nullifier");
+
+    const parsed = JSON.parse(submitForm.payload) as Record<string, unknown>;
+    if (!parsed[submitForm.source]) {
+      throw new Error("Payload JSON must include selected source key");
+    }
+  };
+
+  const validateVerifyForm = () => {
+    assertPubkey(verifyAddress, "Verify address");
+  };
+
+  const validateRevokeForm = () => {
+    assertHex32(revokeForm.nullifier, "Identity nullifier");
+  };
+
+  const validateConfigForm = () => {
+    assertInt(configForm.cooldown, "Cooldown", 0);
+    assertInt(configForm.bonus, "Diversity bonus", 0, 100);
+    assertInt(configForm.ttl, "Proof TTL", 1);
+  };
+
+  const validateRotationForm = () => {
+    assertPubkey(rotationForm.verifier, "Verifier pubkey");
+    assertInt(rotationForm.delay, "Delay", 1);
+  };
+
   const runAction = async (
     key: keyof typeof pending,
     action: () => Promise<void>
@@ -95,7 +163,7 @@ export default function Page() {
     try {
       await action();
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
+      const message = getFriendlyError(error);
       setNotice({ type: "error", text: message });
       addLog(`Error: ${message}`);
     } finally {
@@ -161,6 +229,7 @@ export default function Page() {
               await runAction("submit", async () => {
                 if (!program || !publicKey)
                   throw new Error("Connect wallet first");
+                validateSubmitForm();
 
                 const sig = await submitProof({
                   program,
@@ -272,6 +341,7 @@ export default function Page() {
                 e.preventDefault();
                 await runAction("verify", async () => {
                   if (!program) throw new Error("Connect wallet first");
+                  validateVerifyForm();
                   const result = await verifyProof({
                     program,
                     user: verifyAddress,
@@ -305,6 +375,7 @@ export default function Page() {
                 await runAction("revoke", async () => {
                   if (!program || !publicKey)
                     throw new Error("Connect wallet first");
+                  validateRevokeForm();
                   const sig = await revokeProof({
                     program,
                     user: publicKey,
@@ -360,6 +431,7 @@ export default function Page() {
               await runAction("config", async () => {
                 if (!program || !publicKey)
                   throw new Error("Connect wallet first");
+                validateConfigForm();
                 const sig = await updateRegistryConfig({
                   program,
                   authority: publicKey,
@@ -415,6 +487,7 @@ export default function Page() {
               await runAction("rotateInit", async () => {
                 if (!program || !publicKey)
                   throw new Error("Connect wallet first");
+                validateRotationForm();
                 const sig = await initiateRotation({
                   program,
                   authority: publicKey,
